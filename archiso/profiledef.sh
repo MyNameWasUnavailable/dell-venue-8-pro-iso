@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034
 # archiso profile definition for Dell Venue 8 Pro 5830 automated install
+# Bay Trail (Atom Z3740D) is UEFI-only — no legacy BIOS/syslinux needed.
 
 iso_name="arch-venue-8-pro"
 iso_label="ARCH_VENUE8PRO_$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y%m)"
@@ -9,7 +10,7 @@ iso_application="Arch Linux - Dell Venue 8 Pro 5830 Automated Installer"
 iso_version="$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y.%m.%d)"
 install_dir="arch"
 buildmodes=('iso')
-bootmodes=('bios.syslinux' 'uefi.systemd-boot')
+bootmodes=('uefi.systemd-boot')
 pacman_conf="pacman.conf"
 airootfs_image_type="squashfs"
 airootfs_image_tool_options=('-comp' 'xz' '-Xbcj' 'x86' '-b' '1M' '-Xdict-size' '1M')
