@@ -1,0 +1,16 @@
+[Unit]
+Description=Automated Dell Venue 8 Pro 5830 Installation
+After=network.target
+Before=getty.target
+ConditionPathExists=!/var/lib/venue-installed
+
+[Service]
+Type=oneshot
+ExecStart=/root/install-venue.sh
+ExecStartPost=/usr/bin/touch /var/lib/venue-installed
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
