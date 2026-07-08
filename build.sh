@@ -6,6 +6,7 @@
 set -o errexit -o nounset -o pipefail
 
 OUTPUT_DIR="${1:-.}"
+WORK_DIR="${2:-/tmp/archiso-work}"
 TEMP_DIR="$(mktemp -d)"
 UPSTREAM_REPO="https://github.com/ramonvanraaij/dell-venue-8-pro.git"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,7 +19,8 @@ error() { echo "[ERROR] $*" >&2; exit 1; }
 trap 'rm -rf "${TEMP_DIR}"' EXIT
 
 log "Automated Arch Linux ISO builder for Dell Venue 8 Pro 5830"
-log "Output directory: ${OUTPUT_DIR}"
+log "Output directory : ${OUTPUT_DIR}"
+log "Work directory   : ${WORK_DIR}"
 
 # === Step 1: Clone upstream repository ===
 log "Cloning upstream hardware fixes from ramonvanraaij/dell-venue-8-pro..."
@@ -132,14 +134,21 @@ log "Building ISO with mkarchiso..."
 log "This may take 20-40 minutes depending on internet speed and CPU."
 
 sudo mkdir -p "${OUTPUT_DIR}"
-sudo mkarchiso -v -o "${OUTPUT_DIR}" "${ARCHISO_DIR}"
+sudo mkdir -p "${WORK_DIR}"
 
-if [ -f "${OUTPUT_DIR}"/arch-*.iso ]; then
-    ISO_FILE="$(ls -1 ${OUTPUT_DIR}/arch-*.iso | head -1)"
+# -w workdir is required — mkarchiso uses realpath() on it and fails with an
+# empty string if it is omitted or if the directory does not already exist.
+sudo mkarchiso -v -w "${WORK_DIR}" -o "${OUTPUT_DIR}" "${ARCHISO_DIR}"
+
+# Clean up work directory (can be several GB)
+sudo rm -rf "${WORK_DIR}"
+
+if ls "${OUTPUT_DIR}"/arch-*.iso 1>/dev/null 2>&1; then
+    ISO_FILE="$(ls -1 "${OUTPUT_DIR}"/arch-*.iso | head -1)"
     ISO_SIZE="$(du -h "${ISO_FILE}" | cut -f1)"
     log "✓ ISO build successful!"
-    log "  ISO file: ${ISO_FILE}"
-    log "  Size: ${ISO_SIZE}"
+    log "  ISO file : ${ISO_FILE}"
+    log "  Size     : ${ISO_SIZE}"
     log ""
     log "Next steps:"
     log "  1. Write to USB: sudo dd if=${ISO_FILE} of=/dev/sdX bs=4M status=progress && sync"
