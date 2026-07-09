@@ -1,53 +1,83 @@
 # Base system
-base linux linux-firmware linux-headers
-btrfs-progs intel-ucode efibootmgr systemd-boot
-acpica dosfstools
+base
+linux
+linux-firmware
+linux-headers
+btrfs-progs
+intel-ucode
+efibootmgr
+dosfstools
 
 # Build tools (for batfix kernel module compilation and ACPI override)
-base-devel iasl
+base-devel
+iasl
 
 # Networking
-networkmanager iw wireless-regdb
+networkmanager
+iw
+wireless-regdb
 
 # Bluetooth
-bluez bluez-utils bluez-deprecated-tools
+bluez
+bluez-utils
 
 # Desktop environment (Plasma Mobile for touch)
-plasma-mobile plasma-desktop kde-system-meta
-sddm sddm-kcm archlinux-themes-sddm
-plasma-workspace-wallpapers oxygen breeze-gtk breeze-icons
-kde-gtk-config kdeplasma-addons kscreen
+plasma-mobile
+plasma-desktop
+sddm
+plasma-workspace-wallpapers
+breeze-gtk
+breeze-icons
+kde-gtk-config
+kdeplasma-addons
+kscreen
 
 # KDE/Plasma utilities
-kinfocenter kmenuedit systemsettings kdeconnect
-plasma-systemmonitor plasma-firewall kwalletmanager
-drkonqi polkit-kde-agent discover print-manager
+kinfocenter
+kmenuedit
+systemsettings
+kdeconnect
+plasma-systemmonitor
+plasma-firewall
+kwalletmanager
+polkit-kde-agent
 
 # Touch & input
-wacomtablet iio-sensor-proxy
-qt5-wayland qt6-wayland
-qt5-quickcontrols layer-shell-qt5
+iio-sensor-proxy
+qt5-wayland
+qt6-wayland
 
 # Audio (PipeWire)
-pipewire pipewire-alsa pipewire-jack pipewire-pulse
-wireplumber libpulse gst-plugin-pipewire alsa-utils
-
-# On-screen keyboard
-org.kde.plasma.keyboard
+pipewire
+pipewire-alsa
+pipewire-jack
+pipewire-pulse
+wireplumber
+libpulse
+gst-plugin-pipewire
+alsa-utils
 
 # Terminal
-qmlkonsole
+konsole
 
 # Utilities
-spectacle nano gvim ex-vi-compat
-fastfetch tmux git openssh wget
+spectacle
+nano
+vim
+fastfetch
+tmux
+git
+openssh
+wget
 
 # System monitoring
-powertop acpi thermald power-profiles-daemon
-zram-generator libgpiod usbutils
-
-# GUI package manager
-octopi
+powertop
+acpi
+thermald
+power-profiles-daemon
+zram-generator
+usbutils
 
 # Fonts
-ttf-dejavu ttf-liberation
+ttf-dejavu
+ttf-liberation
