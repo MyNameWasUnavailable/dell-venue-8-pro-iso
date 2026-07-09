@@ -5,8 +5,8 @@
 
 set -o errexit -o nounset -o pipefail
 
-OUTPUT_DIR="${1:-.}"
-WORK_DIR="${2:-/tmp/archiso-work}"
+OUTPUT_DIR="${1:-${HOME}/archiso-out}"
+WORK_DIR="${2:-${HOME}/archiso-work}"
 TEMP_DIR="$(mktemp -d)"
 UPSTREAM_REPO="https://github.com/ramonvanraaij/dell-venue-8-pro.git"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -133,7 +133,7 @@ log "Integration complete. All hardware fixes embedded in archiso."
 log "Building ISO with mkarchiso..."
 log "This may take 20-40 minutes depending on internet speed and CPU."
 
-sudo mkdir -p "${OUTPUT_DIR}"
+mkdir -p "${OUTPUT_DIR}"
 sudo mkdir -p "${WORK_DIR}"
 
 # -w workdir is required — mkarchiso uses realpath() on it and fails with an
