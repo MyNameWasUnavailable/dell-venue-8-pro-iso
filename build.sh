@@ -5,8 +5,13 @@
 
 set -o errexit -o nounset -o pipefail
 
-OUTPUT_DIR="${1:-${HOME}/archiso-out}"
-WORK_DIR="${2:-${HOME}/archiso-work}"
+# Resolve the home directory of the user who invoked sudo (or the current user
+# if run directly), so the ISO lands in their home rather than /root.
+REAL_USER="${SUDO_USER:-${USER}}"
+REAL_HOME="$(getent passwd "${REAL_USER}" | cut -d: -f6)"
+
+OUTPUT_DIR="${1:-${REAL_HOME}/archiso-out}"
+WORK_DIR="${2:-${REAL_HOME}/archiso-work}"
 TEMP_DIR="$(mktemp -d)"
 UPSTREAM_REPO="https://github.com/ramonvanraaij/dell-venue-8-pro.git"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -142,6 +147,9 @@ sudo mkarchiso -v -w "${WORK_DIR}" -o "${OUTPUT_DIR}" "${ARCHISO_DIR}"
 
 # Clean up work directory (can be several GB)
 sudo rm -rf "${WORK_DIR}"
+
+# Return ownership of the output directory to the invoking user
+chown -R "${REAL_USER}:" "${OUTPUT_DIR}"
 
 if ls "${OUTPUT_DIR}"/arch-*.iso 1>/dev/null 2>&1; then
     ISO_FILE="$(ls -1 "${OUTPUT_DIR}"/arch-*.iso | head -1)"
