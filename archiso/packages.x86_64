@@ -3,6 +3,7 @@ base
 linux
 linux-firmware
 linux-headers
+mkinitcpio-archiso
 btrfs-progs
 intel-ucode
 efibootmgr
