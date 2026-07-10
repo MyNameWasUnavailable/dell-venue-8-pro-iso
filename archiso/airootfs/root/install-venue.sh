@@ -211,7 +211,11 @@ echo "LANG=en_US.UTF-8" > /etc/locale.conf
 echo "KEYMAP=us"        > /etc/vconsole.conf
 
 # --- Timezone ---
-ln -sf /usr/share/zoneinfo/UTC /etc/localtime
+ln -sf /usr/share/zoneinfo/Australia/Sydney /etc/localtime
+hwclock --systohc
+
+# --- Disable systemd-firstboot so it never prompts interactively ---
+systemctl mask systemd-firstboot.service
 
 # --- Hostname ---
 echo "venue-8-pro" > /etc/hostname
