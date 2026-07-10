@@ -4,7 +4,7 @@
 # Bay Trail (Atom Z3740D) is UEFI-only — no legacy BIOS/syslinux needed.
 
 iso_name="arch-venue-8-pro"
-iso_label="ARCH_VENUE8PRO_$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y%m)"
+iso_label="VENUE8PRO"
 iso_publisher="MyNameWasUnavailable <https://github.com/MyNameWasUnavailable/dell-venue-8-pro-iso>"
 iso_application="Arch Linux - Dell Venue 8 Pro 5830 Automated Installer"
 iso_version="$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y.%m.%d)"
