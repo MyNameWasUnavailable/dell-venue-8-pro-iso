@@ -1,0 +1,2 @@
+# This file masks systemd-firstboot in the live ISO environment
+# so it never prompts interactively during boot.
