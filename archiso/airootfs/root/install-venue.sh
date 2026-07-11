@@ -25,24 +25,54 @@ error() { echo "[ERROR]   $*" >&2; exit 1; }
 log "--- Hardware detection ---"
 
 # --- eMMC / target block device ---
-# Prefer /dev/mmcblk1 (internal eMMC); fall back to /dev/mmcblk0 then /dev/sda.
-detect_emmc() {
-    for candidate in /dev/mmcblk1 /dev/mmcblk0 /dev/sda; do
-        if [ -b "${candidate}" ]; then
+# Prefer a non-removable internal mmc device; explicitly reject removable/USB media.
+detect_install_target() {
+    local candidate sysbase removable size transport
+
+    for candidate in /dev/mmcblk1 /dev/mmcblk0 /dev/nvme0n1 /dev/sda; do
+        [ -b "${candidate}" ] || continue
+        sysbase="/sys/class/block/$(basename "${candidate}")"
+        [ -d "${sysbase}" ] || continue
+
+        removable="$(cat "${sysbase}/removable" 2>/dev/null || echo 1)"
+        size="$(cat "${sysbase}/size" 2>/dev/null || echo 0)"
+        transport="$(readlink -f "${sysbase}/device/subsystem" 2>/dev/null || true)"
+
+        if [[ "${candidate}" == /dev/mmcblk* ]]; then
+            if [ "${removable}" = "0" ] && [ "${size}" -gt 0 ]; then
+                echo "${candidate}"
+                return 0
+            fi
+            continue
+        fi
+
+        if [ "${removable}" = "1" ]; then
+            warn "Skipping removable block device ${candidate}"
+            continue
+        fi
+
+        if [[ "${transport}" == *usb* ]]; then
+            warn "Skipping USB-backed block device ${candidate}"
+            continue
+        fi
+
+        if [ "${size}" -gt 0 ]; then
             echo "${candidate}"
             return 0
         fi
     done
+
     return 1
 }
-TARGET_DEVICE="$(detect_emmc)" \
-    || error "No eMMC / target block device found. Checked /dev/mmcblk1, /dev/mmcblk0, /dev/sda."
+
+TARGET_DEVICE="$(detect_install_target)" \
+    || error "No safe internal install target found. Refusing to install to removable or USB-backed storage."
 log "Target device : ${TARGET_DEVICE}"
 
-# Derive partition suffix: mmcblk* uses 'p1'/'p2', sda uses '1'/'2'
+# Derive partition suffix: mmcblk* and nvme* use 'p1'/'p2', sda uses '1'/'2'
 case "${TARGET_DEVICE}" in
-    *mmcblk*) PART_SEP="p" ;;
-    *)        PART_SEP=""  ;;
+    *mmcblk*|*nvme*) PART_SEP="p" ;;
+    *)               PART_SEP=""  ;;
 esac
 BOOT_PART="${TARGET_DEVICE}${PART_SEP}1"
 ROOT_PART="${TARGET_DEVICE}${PART_SEP}2"
@@ -140,18 +170,11 @@ genfstab -U "${TARGET_MOUNT}" >> "${TARGET_MOUNT}/etc/fstab"
 
 # =============================================================================
 # STEP 6: Substitute hardware identifiers in copied upstream config files
-#
-# The upstream repo (ramonvanraaij/dell-venue-8-pro) documents placeholder
-# strings such as <TABLET_IP>, <WIFI_MAC>, <WIFI_IFACE>, <BT_MAC> in its
-# README. This step replaces any such tokens found in the pre-copied airootfs
-# configs with the real values we detected above.  It is a no-op for files that
-# contain no placeholders (the common case today) and is safe to re-run.
 # =============================================================================
 log "Substituting hardware identifiers in config files..."
 
 substitute_placeholders() {
     local file="$1"
-    # Only process regular text files that actually contain a placeholder token
     grep -qE '<(WIFI_MAC|WIFI_IFACE|BT_MAC|TABLET_IP)>' "${file}" 2>/dev/null || return 0
 
     log "  Patching placeholders in: ${file}"
@@ -161,9 +184,7 @@ substitute_placeholders() {
     [ -n "${TABLET_IP}" ]  && sed -i "s|<TABLET_IP>|${TABLET_IP}|g"   "${file}"
 }
 
-# Scan the full installed tree for any remaining placeholder tokens
 while IFS= read -r -d '' f; do
-    # Skip binary files cheaply
     file "${f}" 2>/dev/null | grep -q 'text' || continue
     substitute_placeholders "${f}"
 done < <(find "${TARGET_MOUNT}/etc" "${TARGET_MOUNT}/usr/local" -type f -print0 2>/dev/null)
@@ -172,7 +193,6 @@ log "Placeholder substitution complete."
 
 # =============================================================================
 # STEP 7: Write a hardware-info file into the installed system
-# (useful for debugging / reference after first boot)
 # =============================================================================
 mkdir -p "${TARGET_MOUNT}/etc/venue-hardware"
 cat > "${TARGET_MOUNT}/etc/venue-hardware/detected.conf" <<HWEOF
@@ -191,10 +211,6 @@ log "Hardware info written to /etc/venue-hardware/detected.conf"
 # =============================================================================
 log "Entering chroot for system configuration..."
 
-# Export detected values so they are available inside the here-doc substitution
-# Note: the chroot block uses << 'CHROOT' (single-quoted) to prevent premature
-# expansion, so we inject the dynamic values via environment variables that are
-# expanded by the outer shell before the block is passed to arch-chroot.
 WIFI_IFACE_VAL="${WIFI_IFACE}"
 ROOT_PART_VAL="${ROOT_PART}"
 
@@ -203,21 +219,17 @@ set -o errexit -o nounset -o pipefail
 
 log() { echo "[CHROOT] \$*" >&2; }
 
-# --- Localization ---
 log "Setting up localization..."
 echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
 locale-gen
 echo "LANG=en_US.UTF-8" > /etc/locale.conf
 echo "KEYMAP=us"        > /etc/vconsole.conf
 
-# --- Timezone ---
 ln -sf /usr/share/zoneinfo/Australia/Sydney /etc/localtime
 hwclock --systohc
 
-# --- Disable systemd-firstboot so it never prompts interactively ---
 systemctl mask systemd-firstboot.service
 
-# --- Hostname ---
 echo "venue-8-pro" > /etc/hostname
 cat > /etc/hosts <<EOF
 127.0.0.1 localhost
@@ -225,11 +237,9 @@ cat > /etc/hosts <<EOF
 127.0.1.1 venue-8-pro.localdomain venue-8-pro
 EOF
 
-# --- System clock ---
 log "Enabling NTP..."
 systemctl enable systemd-timesyncd
 
-# --- Essential packages ---
 log "Installing essential packages..."
 pacman -S --noconfirm --needed \
     base-devel acpica iasl \
@@ -238,7 +248,6 @@ pacman -S --noconfirm --needed \
     networkmanager iw \
     powertop acpi thermald power-profiles-daemon zram-generator
 
-# --- Plasma Mobile + KDE ---
 log "Installing Plasma Mobile desktop..."
 pacman -S --noconfirm --needed \
     plasma-mobile plasma-desktop kde-system-meta \
@@ -256,7 +265,6 @@ pacman -S --noconfirm --needed \
     fastfetch tmux git openssh wget octopi \
     ttf-dejavu ttf-liberation
 
-# --- User account: arch / arch with sudo ---
 log "Creating user 'arch' with sudo access..."
 pacman -S --noconfirm sudo
 groupadd -f wheel
@@ -264,12 +272,8 @@ useradd -m -g wheel -s /bin/bash arch
 echo 'arch:arch' | chpasswd
 sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 
-# --- Root password ---
 echo 'root:arch' | chpasswd
 
-# --- NetworkManager: ensure the detected Wi-Fi interface name is used ---
-# The upstream 30-no-mac-rand.conf is generic (no iface name needed), but we
-# also write a connection hint so NetworkManager manages the correct interface.
 log "Configuring NetworkManager for interface ${WIFI_IFACE_VAL}..."
 mkdir -p /etc/NetworkManager/conf.d
 cat > /etc/NetworkManager/conf.d/10-venue-iface.conf <<NM
@@ -282,9 +286,11 @@ match-device=interface-name:${WIFI_IFACE_VAL}
 managed=true
 NM
 
-# --- systemd-boot ---
 log "Configuring systemd-boot..."
-bootctl --esp-path=/boot install 2>/dev/null || true
+bootctl --esp-path=/boot install
+[ -f /boot/EFI/systemd/systemd-bootx64.efi ] || [ -f /boot/EFI/BOOT/BOOTX64.EFI ] || \
+    [ -f /boot/EFI/systemd/systemd-bootia32.efi ] || [ -f /boot/EFI/BOOT/BOOTIA32.EFI ] || \
+    { echo "[CHROOT] systemd-boot files not found after bootctl install" >&2; exit 1; }
 
 mkdir -p /boot/loader/entries
 cat > /boot/loader/loader.conf <<LOADEREOF
@@ -305,7 +311,6 @@ ENTRYEOF
 ROOT_UUID="\$(blkid -s UUID -o value ${ROOT_PART_VAL})"
 sed -i "s|UUID=PLACEHOLDER|UUID=\${ROOT_UUID}|" /boot/loader/entries/arch.conf
 
-# --- ACPI bt0off override ---
 log "Building ACPI bt0off override..."
 mkdir -p /tmp/acpi_build
 cd /tmp/acpi_build
@@ -319,27 +324,22 @@ sed -i 's|^initrd  /intel-ucode.img|initrd  /acpi_override.img\ninitrd  /intel-u
 cd /
 rm -rf /tmp/acpi_build
 
-# --- Build and install bthci ---
 log "Building bthci Bluetooth bring-up tool..."
 gcc -O2 -o /usr/local/sbin/bthci /root/venue-fix-src/bthci.c
 chmod 755 /usr/local/sbin/bthci
 
-# --- Build and install batfix kernel module ---
 log "Building batfix kernel module..."
 /usr/local/sbin/venue-batfix-build.sh
 
-# --- Permissions on fix scripts ---
 log "Setting permissions on fix scripts..."
 chmod +x /usr/local/sbin/ath6kl-tune.sh
 chmod +x /usr/local/sbin/arch-launcher-icon.sh
 chmod +x /usr/local/sbin/venue-batfix-build.sh
 
-# --- Enable services ---
 log "Enabling services..."
 systemctl enable sddm NetworkManager thermald power-profiles-daemon
 systemctl enable ath6kl-tune.service bt-venue.service
 
-# --- Attribution ---
 log "Installing attribution file..."
 mkdir -p /usr/share/doc
 cat > /usr/share/doc/DELL_VENUE_FIXES_ATTRIBUTION.txt <<'ATTRIBUTION'
@@ -370,9 +370,6 @@ ATTRIBUTION
 log "System configuration complete!"
 CHROOT
 
-# =============================================================================
-# STEP 9: Unmount and reboot
-# =============================================================================
 log "Installation successful! Unmounting filesystems..."
 umount -R "${TARGET_MOUNT}"
 
