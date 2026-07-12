@@ -1,0 +1,22 @@
+[Unit]
+Description=Run Dell Venue 8 Pro installer on tty1
+After=systemd-user-sessions.service local-fs.target
+Conflicts=getty@tty1.service
+Before=getty@tty1.service
+ConditionPathExists=/root/install-venue.sh
+ConditionPathExists=!/var/lib/venue-installed
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/bash -lc '/root/install-venue.sh && /usr/bin/touch /var/lib/venue-installed'
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+Restart=no
+
+[Install]
+WantedBy=multi-user.target
