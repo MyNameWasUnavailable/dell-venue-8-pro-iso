@@ -337,8 +337,9 @@ chmod +x /usr/local/sbin/arch-launcher-icon.sh
 chmod +x /usr/local/sbin/venue-batfix-build.sh
 
 log "Enabling services..."
-systemctl enable sddm NetworkManager thermald power-profiles-daemon
+systemctl enable NetworkManager thermald power-profiles-daemon
 systemctl enable ath6kl-tune.service bt-venue.service
+systemctl set-default multi-user.target
 
 log "Installing attribution file..."
 mkdir -p /usr/share/doc
