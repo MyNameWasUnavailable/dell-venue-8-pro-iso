@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # build.sh - Build automated Arch Linux ISO for Dell Venue 8 Pro 5830
 # This script clones the upstream hardware fixes from ramonvanraaij/dell-venue-8-pro
-# and integrates them into the archiso build.
+# and integrates them into a temporary archiso tree before building.
 
 set -o errexit -o nounset -o pipefail
 
@@ -15,8 +15,9 @@ WORK_DIR="${2:-${REAL_HOME}/archiso-work}"
 TEMP_DIR="$(mktemp -d)"
 UPSTREAM_REPO="https://github.com/ramonvanraaij/dell-venue-8-pro.git"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-ARCHISO_DIR="${SCRIPT_DIR}/archiso"
-AIROOTFS="${ARCHISO_DIR}/airootfs"
+SOURCE_ARCHISO_DIR="${SCRIPT_DIR}/archiso"
+BUILD_ARCHISO_DIR="${TEMP_DIR}/archiso"
+AIROOTFS="${BUILD_ARCHISO_DIR}/airootfs"
 
 log() { echo "[BUILD] $*" >&2; }
 error() { echo "[ERROR] $*" >&2; exit 1; }
@@ -26,6 +27,12 @@ trap 'rm -rf "${TEMP_DIR}"' EXIT
 log "Automated Arch Linux ISO builder for Dell Venue 8 Pro 5830"
 log "Output directory : ${OUTPUT_DIR}"
 log "Work directory   : ${WORK_DIR}"
+log "Source archiso   : ${SOURCE_ARCHISO_DIR}"
+log "Build archiso    : ${BUILD_ARCHISO_DIR}"
+
+# === Step 0: Prepare isolated build tree ===
+log "Copying archiso profile into temporary build tree..."
+cp -a "${SOURCE_ARCHISO_DIR}" "${BUILD_ARCHISO_DIR}"
 
 # === Step 1: Clone upstream repository ===
 log "Cloning upstream hardware fixes from ramonvanraaij/dell-venue-8-pro..."
@@ -37,10 +44,9 @@ fi
 
 log "Upstream repository cloned successfully."
 
-# === Step 2: Copy hardware fix configurations ===
-log "Integrating hardware fixes into archiso..."
+# === Step 2: Copy hardware fix configurations into temporary build tree ===
+log "Integrating hardware fixes into temporary archiso tree..."
 
-# Create necessary directories
 mkdir -p \
   "${AIROOTFS}/etc/modprobe.d" \
   "${AIROOTFS}/etc/sysctl.d" \
@@ -54,53 +60,43 @@ mkdir -p \
   "${AIROOTFS}/usr/local/src/venue-batfix" \
   "${AIROOTFS}/root/venue-fix-src"
 
-# Copy modprobe configurations
 log "Copying modprobe configurations..."
 cp "${TEMP_DIR}/upstream/etc/modprobe.d/ath6kl.conf" "${AIROOTFS}/etc/modprobe.d/"
 cp "${TEMP_DIR}/upstream/etc/modprobe.d/cfg80211-regdom.conf" "${AIROOTFS}/etc/modprobe.d/"
 
-# Copy sysctl configurations
 log "Copying sysctl power management configurations..."
 cp "${TEMP_DIR}/upstream/etc/sysctl.d/99-venue-power.conf" "${AIROOTFS}/etc/sysctl.d/"
 cp "${TEMP_DIR}/upstream/etc/sysctl.d/99-zram-tablet.conf" "${AIROOTFS}/etc/sysctl.d/"
 
-# Copy systemd configurations
 log "Copying systemd configurations..."
 cp "${TEMP_DIR}/upstream/etc/systemd/zram-generator.conf" "${AIROOTFS}/etc/systemd/"
 cp "${TEMP_DIR}/upstream/etc/systemd/coredump.conf.d/disable-storage.conf" "${AIROOTFS}/etc/systemd/coredump.conf.d/"
 cp "${TEMP_DIR}/upstream/etc/systemd/system/ath6kl-tune.service" "${AIROOTFS}/etc/systemd/system/"
 cp "${TEMP_DIR}/upstream/etc/systemd/system/bt-venue.service" "${AIROOTFS}/etc/systemd/system/"
 
-# Copy NetworkManager configurations
 log "Copying NetworkManager configurations..."
 cp "${TEMP_DIR}/upstream/etc/NetworkManager/conf.d/30-no-mac-rand.conf" "${AIROOTFS}/etc/NetworkManager/conf.d/"
 
-# Copy udev rules
 log "Copying udev rules..."
 cp "${TEMP_DIR}/upstream/etc/udev/rules.d/99-emmc-fixed-disk.rules" "${AIROOTFS}/etc/udev/rules.d/"
 
-# Copy pacman hooks
 log "Copying pacman hooks..."
 cp "${TEMP_DIR}/upstream/etc/pacman.d/hooks/zz-arch-launcher-icon.hook" "${AIROOTFS}/etc/pacman.d/hooks/"
 cp "${TEMP_DIR}/upstream/etc/pacman.d/hooks/venue-batfix.hook" "${AIROOTFS}/etc/pacman.d/hooks/"
 
-# Copy module loaders
 log "Copying module load configuration..."
 cp "${TEMP_DIR}/upstream/etc/modules-load.d/venue-batfix.conf" "${AIROOTFS}/etc/modules-load.d/"
 
-# Copy shell scripts
 log "Copying hardware fix scripts..."
 cp "${TEMP_DIR}/upstream/usr/local/sbin/ath6kl-tune.sh" "${AIROOTFS}/usr/local/sbin/"
 cp "${TEMP_DIR}/upstream/usr/local/sbin/arch-launcher-icon.sh" "${AIROOTFS}/usr/local/sbin/"
 cp "${TEMP_DIR}/upstream/usr/local/sbin/venue-batfix-build.sh" "${AIROOTFS}/usr/local/sbin/"
 chmod +x "${AIROOTFS}/usr/local/sbin"/*.sh
 
-# Copy kernel module source
 log "Copying batfix kernel module source..."
 cp "${TEMP_DIR}/upstream/usr/local/src/venue-batfix/batfix.c" "${AIROOTFS}/usr/local/src/venue-batfix/"
 cp "${TEMP_DIR}/upstream/usr/local/src/venue-batfix/Makefile" "${AIROOTFS}/usr/local/src/venue-batfix/"
 
-# Copy ACPI override source and bthci source to install-venue.sh patch area
 log "Copying source files for build-time compilation..."
 cp "${TEMP_DIR}/upstream/acpi/bt0off.dsl" "${AIROOTFS}/root/venue-fix-src/"
 cp "${TEMP_DIR}/upstream/src/bthci.c" "${AIROOTFS}/root/venue-fix-src/"
@@ -132,7 +128,7 @@ All files retain their original copyright and license headers.
 This archiso build orchestrates these components into a seamless automated deployment.
 ATTRIBUTION
 
-log "Integration complete. All hardware fixes embedded in archiso."
+log "Integration complete. All hardware fixes embedded in temporary archiso tree."
 
 # === Step 4: Build ISO ===
 log "Building ISO with mkarchiso..."
@@ -143,7 +139,7 @@ sudo mkdir -p "${WORK_DIR}"
 
 # -w workdir is required — mkarchiso uses realpath() on it and fails with an
 # empty string if it is omitted or if the directory does not already exist.
-sudo mkarchiso -v -w "${WORK_DIR}" -o "${OUTPUT_DIR}" "${ARCHISO_DIR}"
+sudo mkarchiso -v -w "${WORK_DIR}" -o "${OUTPUT_DIR}" "${BUILD_ARCHISO_DIR}"
 
 # Clean up work directory (can be several GB)
 sudo rm -rf "${WORK_DIR}"
