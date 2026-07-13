@@ -14,6 +14,8 @@ set -o errexit -o nounset -o pipefail
 
 TARGET_MOUNT="/mnt"
 BOOT_SIZE="512M"
+ISO_PKG_DIR="/run/archiso/bootmnt/arch/pkg"
+TARGET_PACMAN_CONF="/tmp/venue-target-pacman.conf"
 
 log()   { echo "[INSTALL] $*" >&2; }
 warn()  { echo "[WARN]    $*" >&2; }
@@ -157,10 +159,23 @@ mkdir -p "${TARGET_MOUNT}/boot"
 mount "${BOOT_PART}" "${TARGET_MOUNT}/boot"
 
 # =============================================================================
-# STEP 4: Bootstrap Arch Linux from packages already present on the ISO
+# STEP 4: Bootstrap Arch Linux from the ISO's local package repository
 # =============================================================================
-log "Bootstrapping Arch Linux from ISO packages (offline pacstrap)..."
-pacstrap "${TARGET_MOUNT}" \
+log "Preparing offline pacman configuration..."
+[ -d "${ISO_PKG_DIR}" ] || error "ISO package directory not found at ${ISO_PKG_DIR}"
+cat > "${TARGET_PACMAN_CONF}" <<EOF
+[options]
+Architecture = auto
+CheckSpace
+SigLevel = Never
+LocalFileSigLevel = Never
+
+[local]
+Server = file://${ISO_PKG_DIR}
+EOF
+
+log "Bootstrapping Arch Linux from ISO-local package repository..."
+pacstrap -C "${TARGET_PACMAN_CONF}" "${TARGET_MOUNT}" \
     base linux linux-firmware linux-headers mkinitcpio intel-ucode sudo \
     base-devel acpica iasl gcc make pkgconf cpio \
     btrfs-progs efibootmgr dosfstools \
@@ -180,6 +195,8 @@ pacstrap "${TARGET_MOUNT}" \
     gst-plugin-pipewire alsa-utils \
     qmlkonsole spectacle nano gvim ex-vi-compat fastfetch tmux \
     ttf-dejavu ttf-liberation
+
+cp "${TARGET_PACMAN_CONF}" "${TARGET_MOUNT}/etc/pacman.conf"
 
 # =============================================================================
 # STEP 5: Generate fstab
