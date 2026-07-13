@@ -14,7 +14,6 @@ set -o errexit -o nounset -o pipefail
 
 TARGET_MOUNT="/mnt"
 BOOT_SIZE="512M"
-ISO_PKG_DIR="/run/archiso/bootmnt/arch/pkg"
 TARGET_PACMAN_CONF="/tmp/venue-target-pacman.conf"
 
 log()   { echo "[INSTALL] $*" >&2; }
@@ -63,6 +62,32 @@ detect_install_target() {
             return 0
         fi
     done
+
+    return 1
+}
+
+find_iso_pkg_dir() {
+    local candidate
+
+    for candidate in \
+        /run/archiso/bootmnt/arch/pkg \
+        /run/archiso/bootmnt/*/pkg \
+        /run/archiso/bootmnt/*/*/pkg \
+        /run/archiso/bootmnt/pkg; do
+        for expanded in ${candidate}; do
+            [ -d "${expanded}" ] || continue
+            if find "${expanded}" -maxdepth 1 -type f \( -name '*.pkg.tar*' -o -name '*.db' -o -name '*.files' \) | grep -q .; then
+                echo "${expanded}"
+                return 0
+            fi
+        done
+    done
+
+    candidate="$(find /run/archiso/bootmnt -maxdepth 5 -type d -name pkg 2>/dev/null | head -n1 || true)"
+    if [ -n "${candidate}" ] && find "${candidate}" -maxdepth 1 -type f \( -name '*.pkg.tar*' -o -name '*.db' -o -name '*.files' \) | grep -q .; then
+        echo "${candidate}"
+        return 0
+    fi
 
     return 1
 }
@@ -162,7 +187,8 @@ mount "${BOOT_PART}" "${TARGET_MOUNT}/boot"
 # STEP 4: Bootstrap Arch Linux from the ISO's local package repository
 # =============================================================================
 log "Preparing offline pacman configuration..."
-[ -d "${ISO_PKG_DIR}" ] || error "ISO package directory not found at ${ISO_PKG_DIR}"
+ISO_PKG_DIR="$(find_iso_pkg_dir)" || error "ISO package directory not found under /run/archiso/bootmnt"
+log "Using ISO package directory: ${ISO_PKG_DIR}"
 cat > "${TARGET_PACMAN_CONF}" <<EOF
 [options]
 Architecture = auto
