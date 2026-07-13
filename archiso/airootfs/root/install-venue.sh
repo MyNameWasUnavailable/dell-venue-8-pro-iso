@@ -157,10 +157,29 @@ mkdir -p "${TARGET_MOUNT}/boot"
 mount "${BOOT_PART}" "${TARGET_MOUNT}/boot"
 
 # =============================================================================
-# STEP 4: Bootstrap Arch Linux
+# STEP 4: Bootstrap Arch Linux from packages already present on the ISO
 # =============================================================================
-log "Bootstrapping Arch Linux (pacstrap)..."
-pacstrap -c "${TARGET_MOUNT}" base linux linux-firmware linux-headers intel-ucode
+log "Bootstrapping Arch Linux from ISO packages (offline pacstrap)..."
+pacstrap "${TARGET_MOUNT}" \
+    base linux linux-firmware linux-headers mkinitcpio intel-ucode sudo \
+    base-devel acpica iasl gcc make pkgconf cpio \
+    btrfs-progs efibootmgr dosfstools \
+    wireless-regdb bluez bluez-utils bluez-deprecated-tools \
+    networkmanager iw openssh wget git \
+    powertop acpi thermald power-profiles-daemon zram-generator usbutils \
+    plasma-mobile plasma-desktop kde-system-meta \
+    sddm sddm-kcm archlinux-themes-sddm \
+    plasma-workspace-wallpapers oxygen breeze-gtk breeze-icons \
+    kde-gtk-config kdeplasma-addons kscreen kdeconnect \
+    kinfocenter kmenuedit systemsettings \
+    plasma-systemmonitor plasma-firewall kwalletmanager \
+    drkonqi polkit-kde-agent discover print-manager \
+    wacomtablet iio-sensor-proxy \
+    qt5-wayland qt6-wayland qt5-quickcontrols layer-shell-qt5 \
+    pipewire pipewire-alsa pipewire-jack pipewire-pulse wireplumber libpulse \
+    gst-plugin-pipewire alsa-utils \
+    qmlkonsole spectacle nano gvim ex-vi-compat fastfetch tmux \
+    ttf-dejavu ttf-liberation
 
 # =============================================================================
 # STEP 5: Generate fstab
@@ -247,33 +266,7 @@ EOF
 log "Enabling NTP..."
 systemctl enable systemd-timesyncd
 
-log "Installing essential packages..."
-pacman -S --noconfirm --needed \
-    base-devel acpica iasl \
-    btrfs-progs \
-    wireless-regdb bluez bluez-utils bluez-deprecated-tools \
-    networkmanager iw \
-    powertop acpi thermald power-profiles-daemon zram-generator
-
-log "Installing Plasma Mobile desktop..."
-pacman -S --noconfirm --needed \
-    plasma-mobile plasma-desktop kde-system-meta \
-    sddm sddm-kcm archlinux-themes-sddm \
-    plasma-workspace-wallpapers oxygen breeze-gtk breeze-icons \
-    kde-gtk-config kdeplasma-addons kscreen kdeconnect \
-    kinfocenter kmenuedit systemsettings \
-    plasma-systemmonitor plasma-firewall kwalletmanager \
-    drkonqi polkit-kde-agent discover print-manager \
-    wacomtablet iio-sensor-proxy \
-    qt5-wayland qt6-wayland qt5-quickcontrols layer-shell-qt5 \
-    pipewire pipewire-alsa pipewire-jack pipewire-pulse wireplumber libpulse \
-    gst-plugin-pipewire alsa-utils \
-    qmlkonsole spectacle nano gvim ex-vi-compat \
-    fastfetch tmux git openssh wget octopi \
-    ttf-dejavu ttf-liberation
-
 log "Creating user 'arch' with sudo access..."
-pacman -S --noconfirm sudo
 groupadd -f wheel
 id -u arch >/dev/null 2>&1 || useradd -m -g wheel -s /bin/bash arch
 echo 'arch:arch' | chpasswd
