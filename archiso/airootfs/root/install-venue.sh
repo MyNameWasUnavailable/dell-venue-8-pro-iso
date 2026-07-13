@@ -13,8 +13,8 @@
 set -o errexit -o nounset -o pipefail
 
 TARGET_MOUNT="/mnt"
-BOOT_SIZE="512M"
 TARGET_PACMAN_CONF="/tmp/venue-target-pacman.conf"
+OFFLINE_REPO_NAME="venue-offline"
 
 log()   { echo "[INSTALL] $*" >&2; }
 warn()  { echo "[WARN]    $*" >&2; }
@@ -26,7 +26,6 @@ error() { echo "[ERROR]   $*" >&2; exit 1; }
 log "--- Hardware detection ---"
 
 # --- eMMC / target block device ---
-# Prefer a non-removable internal mmc device; explicitly reject removable/USB media.
 detect_install_target() {
     local candidate sysbase removable size transport
 
@@ -66,10 +65,12 @@ detect_install_target() {
     return 1
 }
 
-find_iso_pkg_dir() {
+find_pkg_source_dir() {
     local candidate
 
     for candidate in \
+        /opt/offline-repo \
+        /var/cache/pacman/pkg \
         /run/archiso/bootmnt/arch/pkg \
         /run/archiso/bootmnt/*/pkg \
         /run/archiso/bootmnt/*/*/pkg \
@@ -83,7 +84,7 @@ find_iso_pkg_dir() {
         done
     done
 
-    candidate="$(find /run/archiso/bootmnt -maxdepth 5 -type d -name pkg 2>/dev/null | head -n1 || true)"
+    candidate="$(find /run/archiso/bootmnt /opt /var/cache/pacman -maxdepth 5 -type d \( -name pkg -o -name offline-repo \) 2>/dev/null | head -n1 || true)"
     if [ -n "${candidate}" ] && find "${candidate}" -maxdepth 1 -type f \( -name '*.pkg.tar*' -o -name '*.db' -o -name '*.files' \) | grep -q .; then
         echo "${candidate}"
         return 0
@@ -92,11 +93,26 @@ find_iso_pkg_dir() {
     return 1
 }
 
+build_target_pacman_conf() {
+    local pkg_dir="$1"
+    local repo_name="$2"
+
+    cat > "${TARGET_PACMAN_CONF}" <<EOF
+[options]
+Architecture = auto
+CheckSpace
+SigLevel = Never
+LocalFileSigLevel = Never
+
+[${repo_name}]
+Server = file://${pkg_dir}
+EOF
+}
+
 TARGET_DEVICE="$(detect_install_target)" \
     || error "No safe internal install target found. Refusing to install to removable or USB-backed storage."
 log "Target device : ${TARGET_DEVICE}"
 
-# Derive partition suffix: mmcblk* and nvme* use 'p1'/'p2', sda uses '1'/'2'
 case "${TARGET_DEVICE}" in
     *mmcblk*|*nvme*) PART_SEP="p" ;;
     *)               PART_SEP=""  ;;
@@ -105,7 +121,6 @@ BOOT_PART="${TARGET_DEVICE}${PART_SEP}1"
 ROOT_PART="${TARGET_DEVICE}${PART_SEP}2"
 
 # --- Wi-Fi interface ---
-# Use 'iw dev' first; fall back to scanning /sys/class/net for a wl* interface.
 detect_wifi_iface() {
     local iface
     iface="$(iw dev 2>/dev/null | awk '/^\s*Interface /{print $2}' | head -1)"
@@ -124,7 +139,6 @@ else
     warn "No Wi-Fi interface detected — defaulting to 'wlan0'. Configs will use that name."
 fi
 
-# --- Bluetooth MAC (best-effort; adapter may not be powered yet) ---
 BT_MAC=""
 if command -v hciconfig &>/dev/null; then
     BT_MAC="$(hciconfig hci0 2>/dev/null | awk '/BD Address/{print $3}' || true)"
@@ -134,7 +148,6 @@ if [ -z "${BT_MAC}" ] && [ -f /sys/class/bluetooth/hci0/address ]; then
 fi
 log "Bluetooth MAC  : ${BT_MAC:-not detected (will be populated at first boot)}"
 
-# --- Tablet IP (informational only) ---
 TABLET_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
 log "Tablet IP      : ${TABLET_IP:-not detected}"
 
@@ -184,23 +197,20 @@ mkdir -p "${TARGET_MOUNT}/boot"
 mount "${BOOT_PART}" "${TARGET_MOUNT}/boot"
 
 # =============================================================================
-# STEP 4: Bootstrap Arch Linux from the ISO's local package repository
+# STEP 4: Bootstrap Arch Linux from an offline local package repository
 # =============================================================================
 log "Preparing offline pacman configuration..."
-ISO_PKG_DIR="$(find_iso_pkg_dir)" || error "ISO package directory not found under /run/archiso/bootmnt"
-log "Using ISO package directory: ${ISO_PKG_DIR}"
-cat > "${TARGET_PACMAN_CONF}" <<EOF
-[options]
-Architecture = auto
-CheckSpace
-SigLevel = Never
-LocalFileSigLevel = Never
+PKG_SOURCE_DIR="$(find_pkg_source_dir)" || error "No offline package source found in /opt/offline-repo, /var/cache/pacman/pkg, or /run/archiso/bootmnt"
+log "Using offline package source: ${PKG_SOURCE_DIR}"
 
-[local]
-Server = file://${ISO_PKG_DIR}
-EOF
+if [ -f "${PKG_SOURCE_DIR}/${OFFLINE_REPO_NAME}.db" ] || [ -f "${PKG_SOURCE_DIR}/${OFFLINE_REPO_NAME}.db.tar.gz" ] || [ -f "${PKG_SOURCE_DIR}/${OFFLINE_REPO_NAME}.db.tar" ]; then
+    REPO_NAME="${OFFLINE_REPO_NAME}"
+else
+    REPO_NAME="local"
+fi
+build_target_pacman_conf "${PKG_SOURCE_DIR}" "${REPO_NAME}"
 
-log "Bootstrapping Arch Linux from ISO-local package repository..."
+log "Bootstrapping Arch Linux from offline package source..."
 pacstrap -C "${TARGET_PACMAN_CONF}" "${TARGET_MOUNT}" \
     base linux linux-firmware linux-headers mkinitcpio intel-ucode sudo \
     base-devel acpica iasl gcc make pkgconf cpio \
@@ -231,30 +241,26 @@ log "Generating fstab..."
 genfstab -U "${TARGET_MOUNT}" >> "${TARGET_MOUNT}/etc/fstab"
 
 # =============================================================================
-# STEP 6: Substitute hardware identifiers in copied upstream config files
+# STEP 6: Substitute hardware identifiers
 # =============================================================================
 log "Substituting hardware identifiers in config files..."
-
 substitute_placeholders() {
     local file="$1"
     grep -qE '<(WIFI_MAC|WIFI_IFACE|BT_MAC|TABLET_IP)>' "${file}" 2>/dev/null || return 0
-
     log "  Patching placeholders in: ${file}"
     [ -n "${WIFI_MAC}" ]   && sed -i "s|<WIFI_MAC>|${WIFI_MAC}|g"     "${file}"
     [ -n "${WIFI_IFACE}" ] && sed -i "s|<WIFI_IFACE>|${WIFI_IFACE}|g" "${file}"
     [ -n "${BT_MAC}" ]     && sed -i "s|<BT_MAC>|${BT_MAC}|g"         "${file}"
     [ -n "${TABLET_IP}" ]  && sed -i "s|<TABLET_IP>|${TABLET_IP}|g"   "${file}"
 }
-
 while IFS= read -r -d '' f; do
     file "${f}" 2>/dev/null | grep -q 'text' || continue
     substitute_placeholders "${f}"
 done < <(find "${TARGET_MOUNT}/etc" "${TARGET_MOUNT}/usr/local" -type f -print0 2>/dev/null)
-
 log "Placeholder substitution complete."
 
 # =============================================================================
-# STEP 7: Write a hardware-info file into the installed system
+# STEP 7: Write hardware-info
 # =============================================================================
 mkdir -p "${TARGET_MOUNT}/etc/venue-hardware"
 cat > "${TARGET_MOUNT}/etc/venue-hardware/detected.conf" <<HWEOF
@@ -272,13 +278,10 @@ log "Hardware info written to /etc/venue-hardware/detected.conf"
 # STEP 8: Chroot + configure system
 # =============================================================================
 log "Entering chroot for system configuration..."
-
 WIFI_IFACE_VAL="${WIFI_IFACE}"
 ROOT_PART_VAL="${ROOT_PART}"
-
 arch-chroot "${TARGET_MOUNT}" /usr/bin/bash << CHROOT
 set -o errexit -o nounset -o pipefail
-
 log() { echo "[CHROOT] \$*" >&2; }
 
 log "Setting up localization..."
@@ -286,7 +289,6 @@ echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
 locale-gen
 echo "LANG=en_US.UTF-8" > /etc/locale.conf
 echo "KEYMAP=us"        > /etc/vconsole.conf
-
 ln -sf /usr/share/zoneinfo/Australia/Sydney /etc/localtime
 hwclock --systohc
 
@@ -296,9 +298,7 @@ ln -s /dev/null /etc/systemd/system/systemd-firstboot.service
 mkdir -p /etc/systemd/system/sysinit.target.wants
 rm -f /etc/systemd/system/sysinit.target.wants/systemd-firstboot.service
 
-mkdir -p /etc
 echo "" > /etc/machine-info
-
 echo "venue-8-pro" > /etc/hostname
 cat > /etc/hosts <<EOF
 127.0.0.1 localhost
@@ -306,20 +306,16 @@ cat > /etc/hosts <<EOF
 127.0.1.1 venue-8-pro.localdomain venue-8-pro
 EOF
 
-log "Enabling NTP..."
 systemctl enable systemd-timesyncd
 
-log "Creating user 'arch' with sudo access..."
 groupadd -f wheel
 id -u arch >/dev/null 2>&1 || useradd -m -g wheel -s /bin/bash arch
 echo 'arch:arch' | chpasswd
 sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
-
 echo 'root:arch' | chpasswd
 passwd -u root || true
 passwd -u arch || true
 
-log "Configuring NetworkManager for interface ${WIFI_IFACE_VAL}..."
 mkdir -p /etc/NetworkManager/conf.d
 cat > /etc/NetworkManager/conf.d/10-venue-iface.conf <<NM
 # Auto-generated by install-venue.sh — detected interface: ${WIFI_IFACE_VAL}
@@ -331,7 +327,6 @@ match-device=interface-name:${WIFI_IFACE_VAL}
 managed=true
 NM
 
-log "Configuring systemd-boot..."
 bootctl --esp-path=/boot install
 [ -f /boot/EFI/systemd/systemd-bootx64.efi ] || [ -f /boot/EFI/BOOT/BOOTX64.EFI ] || \
     [ -f /boot/EFI/systemd/systemd-bootia32.efi ] || [ -f /boot/EFI/BOOT/BOOTIA32.EFI ] || \
@@ -356,7 +351,6 @@ ENTRYEOF
 ROOT_UUID="\$(blkid -s UUID -o value ${ROOT_PART_VAL})"
 sed -i "s|UUID=PLACEHOLDER|UUID=\${ROOT_UUID}|" /boot/loader/entries/arch.conf
 
-log "Building ACPI bt0off override..."
 mkdir -p /tmp/acpi_build
 cd /tmp/acpi_build
 cp /root/venue-fix-src/bt0off.dsl .
@@ -364,29 +358,21 @@ iasl -tc bt0off.dsl
 mkdir -p kernel/firmware/acpi
 cp bt0off.aml kernel/firmware/acpi/
 find kernel | cpio -H newc --create --quiet > /boot/acpi_override.img
-sed -i 's|^initrd  /intel-ucode.img|initrd  /acpi_override.img\ninitrd  /intel-ucode.img|' \
-    /boot/loader/entries/arch.conf
+sed -i 's|^initrd  /intel-ucode.img|initrd  /acpi_override.img\ninitrd  /intel-ucode.img|' /boot/loader/entries/arch.conf
 cd /
 rm -rf /tmp/acpi_build
 
-log "Building bthci Bluetooth bring-up tool..."
 gcc -O2 -o /usr/local/sbin/bthci /root/venue-fix-src/bthci.c
 chmod 755 /usr/local/sbin/bthci
-
-log "Building batfix kernel module..."
 /usr/local/sbin/venue-batfix-build.sh
-
-log "Setting permissions on fix scripts..."
 chmod +x /usr/local/sbin/ath6kl-tune.sh
 chmod +x /usr/local/sbin/arch-launcher-icon.sh
 chmod +x /usr/local/sbin/venue-batfix-build.sh
 
-log "Enabling services..."
 systemctl enable NetworkManager thermald power-profiles-daemon
 systemctl enable ath6kl-tune.service bt-venue.service
 systemctl set-default multi-user.target
 
-log "Installing attribution file..."
 mkdir -p /usr/share/doc
 cat > /usr/share/doc/DELL_VENUE_FIXES_ATTRIBUTION.txt <<'ATTRIBUTION'
 Dell Venue 8 Pro 5830 Hardware Fixes Attribution
@@ -412,13 +398,10 @@ All files retain their original copyright and license headers.
 This automated installation was orchestrated by:
   https://github.com/MyNameWasUnavailable/dell-venue-8-pro-iso
 ATTRIBUTION
-
-log "System configuration complete!"
 CHROOT
 
 log "Installation successful! Unmounting filesystems..."
 umount -R "${TARGET_MOUNT}"
-
 log "Rebooting in 5 seconds..."
 sleep 5
 reboot -f
