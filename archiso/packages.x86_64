@@ -4,6 +4,7 @@ linux
 linux-firmware
 linux-headers
 mkinitcpio-archiso
+arch-install-scripts
 btrfs-progs
 intel-ucode
 efibootmgr
