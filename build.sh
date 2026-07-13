@@ -9,6 +9,7 @@ set -o errexit -o nounset -o pipefail
 # if run directly), so the ISO lands in their home rather than /root.
 REAL_USER="${SUDO_USER:-${USER}}"
 REAL_HOME="$(getent passwd "${REAL_USER}" | cut -d: -f6)"
+REAL_GROUP="$(id -gn "${REAL_USER}")"
 
 OUTPUT_DIR="${1:-${REAL_HOME}/archiso-out}"
 WORK_DIR="${2:-${REAL_HOME}/archiso-work}"
@@ -144,8 +145,17 @@ sudo mkarchiso -v -w "${WORK_DIR}" -o "${OUTPUT_DIR}" "${BUILD_ARCHISO_DIR}"
 # Clean up work directory (can be several GB)
 sudo rm -rf "${WORK_DIR}"
 
-# Return ownership of the output directory to the invoking user
-chown -R "${REAL_USER}:" "${OUTPUT_DIR}"
+# Return ownership of output artifacts to the invoking user when possible and needed.
+if [ -d "${OUTPUT_DIR}" ]; then
+    if find "${OUTPUT_DIR}" \! -user "${REAL_USER}" -print -quit 2>/dev/null | grep -q .; then
+        log "Adjusting ownership of output directory to ${REAL_USER}:${REAL_GROUP}..."
+        if ! sudo chown -R "${REAL_USER}:${REAL_GROUP}" "${OUTPUT_DIR}" 2>/dev/null; then
+            log "Skipping ownership adjustment; filesystem or mount options do not permit chown."
+        fi
+    else
+        log "Output directory already owned by ${REAL_USER}; no chown needed."
+    fi
+fi
 
 if ls "${OUTPUT_DIR}"/arch-*.iso 1>/dev/null 2>&1; then
     ISO_FILE="$(ls -1 "${OUTPUT_DIR}"/arch-*.iso | head -1)"
