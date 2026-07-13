@@ -229,6 +229,13 @@ ln -sf /usr/share/zoneinfo/Australia/Sydney /etc/localtime
 hwclock --systohc
 
 systemctl mask systemd-firstboot.service
+rm -f /etc/systemd/system/systemd-firstboot.service
+ln -s /dev/null /etc/systemd/system/systemd-firstboot.service
+mkdir -p /etc/systemd/system/sysinit.target.wants
+rm -f /etc/systemd/system/sysinit.target.wants/systemd-firstboot.service
+
+mkdir -p /etc
+echo "" > /etc/machine-info
 
 echo "venue-8-pro" > /etc/hostname
 cat > /etc/hosts <<EOF
@@ -268,11 +275,13 @@ pacman -S --noconfirm --needed \
 log "Creating user 'arch' with sudo access..."
 pacman -S --noconfirm sudo
 groupadd -f wheel
-useradd -m -g wheel -s /bin/bash arch
+id -u arch >/dev/null 2>&1 || useradd -m -g wheel -s /bin/bash arch
 echo 'arch:arch' | chpasswd
 sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 
 echo 'root:arch' | chpasswd
+passwd -u root || true
+passwd -u arch || true
 
 log "Configuring NetworkManager for interface ${WIFI_IFACE_VAL}..."
 mkdir -p /etc/NetworkManager/conf.d
