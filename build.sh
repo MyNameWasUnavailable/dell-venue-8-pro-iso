@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_ARCHISO_DIR="${SCRIPT_DIR}/archiso"
 BUILD_ARCHISO_DIR="${TEMP_DIR}/archiso"
 AIROOTFS="${BUILD_ARCHISO_DIR}/airootfs"
-OFFLINE_REPO_DIR="${BUILD_ARCHISO_DIR}/offline-repo"
+OFFLINE_REPO_DIR="${WORK_DIR}/offline-repo"
 OFFLINE_REPO_NAME="venue-offline"
 
 log() { echo "[BUILD] $*" >&2; }
@@ -32,6 +32,7 @@ log "Output directory : ${OUTPUT_DIR}"
 log "Work directory   : ${WORK_DIR}"
 log "Source archiso   : ${SOURCE_ARCHISO_DIR}"
 log "Build archiso    : ${BUILD_ARCHISO_DIR}"
+log "Offline repo dir : ${OFFLINE_REPO_DIR}"
 
 # === Step 0: Prepare isolated build tree ===
 log "Copying archiso profile into temporary build tree..."
@@ -133,18 +134,20 @@ ATTRIBUTION
 
 # === Step 4: Create explicit offline package repository for installer ===
 log "Creating explicit offline package repository payload..."
-mkdir -p "${OFFLINE_REPO_DIR}"
+sudo mkdir -p "${WORK_DIR}"
+sudo rm -rf "${OFFLINE_REPO_DIR}"
+sudo mkdir -p "${OFFLINE_REPO_DIR}"
 cp "${BUILD_ARCHISO_DIR}/packages.x86_64" "${TEMP_DIR}/offline-packages.txt"
 
 log "Downloading package files for offline repository..."
-pacman -Sw --noconfirm --cachedir "${OFFLINE_REPO_DIR}" $(grep -Ev '^\s*#|^\s*$' "${TEMP_DIR}/offline-packages.txt")
+sudo pacman -Sw --noconfirm --cachedir "${OFFLINE_REPO_DIR}" $(grep -Ev '^\s*#|^\s*$' "${TEMP_DIR}/offline-packages.txt")
 
 log "Building local repository database..."
-repo-add "${OFFLINE_REPO_DIR}/${OFFLINE_REPO_NAME}.db.tar.gz" "${OFFLINE_REPO_DIR}"/*.pkg.tar.*
+sudo repo-add "${OFFLINE_REPO_DIR}/${OFFLINE_REPO_NAME}.db.tar.gz" "${OFFLINE_REPO_DIR}"/*.pkg.tar.*
 
 log "Embedding offline repository into live filesystem..."
 mkdir -p "${AIROOTFS}/opt/offline-repo"
-cp -a "${OFFLINE_REPO_DIR}/." "${AIROOTFS}/opt/offline-repo/"
+sudo cp -a "${OFFLINE_REPO_DIR}/." "${AIROOTFS}/opt/offline-repo/"
 
 log "Integration complete. All hardware fixes embedded in temporary archiso tree."
 
